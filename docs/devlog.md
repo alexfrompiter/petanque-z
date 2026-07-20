@@ -32,3 +32,22 @@
 - Создал `docs/ARCHITECTURE.md` — стек, структура папок, поток данных, описание модели
 - Создал `docs/STATUS.md` — текущее состояние проекта
 - Создал `docs/devlog.md` — этот дневник
+
+### Шаг 2 — Каркас Xcode-проекта
+
+- Попутно (пока шло планирование) вручную через Xcode был создан `petanque_z/` проект с неподходящими параметрами (iOS 26.5, bundle `com.alevko.*`). По согласованию удалил его.
+- Создал чистую структуру `PetanqueZ/` (App, Features/Camera, Features/Detection, Domain, Resources) и `PetanqueZTests/`
+- Скопировал `Detector.mlpackage` (4.5 МБ) из `~/projects/petanque/ios/Petanque/Resources/`
+- Написал `project.yml` для XcodeGen:
+  - target `PetanqueZ`, iOS 17.0, Swift 5.9, строгая конкурентность
+  - Bundle ID `com.alexfrompiter.petanque-z`, только iPhone
+  - линкует ARKit + SceneKit
+  - бандлит `Assets.xcassets` и `Detector.mlpackage`
+- Написал `PetanqueZ/Info.plist` (RU, `NSCameraUsageDescription`, `NSMotionUsageDescription`, capability `arm64`+`arkit`, только портрет)
+- Создал пустые `Assets.xcassets` (AppIcon, AccentColor)
+- Написал `PetanqueZApp.swift` (`@main`, тёмная тема) и `RootView.swift` (заглушка)
+- `xcodegen generate` → создан `PetanqueZ.xcodeproj`
+- `xcodebuild build` → ✅ **BUILD SUCCEEDED**. Xcode сам сгенерировал Swift-класс `Detector` из `.mlpackage` — значит модель корректно интегрирована.
+- Обновил `.gitignore`: исключил `*.xcodeproj` и `DerivedData` (проект всегда регенерируется из `project.yml`)
+- Важно: камера не работает в симуляторе — для проверки Phase 1 потребуется сборка на реальном iPhone.
+

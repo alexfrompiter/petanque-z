@@ -12,6 +12,10 @@ xcuserdata/
 *.xccheckout
 *.moved-aside
 
+# XcodeGen: проект генерируется из project.yml, .xcodeproj в git не хранится
+*.xcodeproj
+*.xcworkspace
+
 # Swift Package Manager
 .build/
 Packages/
