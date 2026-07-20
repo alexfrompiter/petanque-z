@@ -51,3 +51,43 @@
 - Обновил `.gitignore`: исключил `*.xcodeproj` и `DerivedData` (проект всегда регенерируется из `project.yml`)
 - Важно: камера не работает в симуляторе — для проверки Phase 1 потребуется сборка на реальном iPhone.
 
+### Шаг 3 — Захват камеры
+
+- `CameraSession.swift` — `@MainActor ObservableObject`, управляет `AVCaptureSession`: запрос разрешения, конфигурация задней камеры 1080p BGRA, доставка кадров через `onFrame` callback на главном потоке
+- `CameraPreviewView.swift` — `UIViewRepresentable` обёртка над `AVCaptureVideoPreviewLayer`
+- `RootView.swift` — превью + статус-баннер (idle/authorizing/denied/failed/running) с RU-локализацией и кнопкой «Открыть настройки» при отказе
+- ✅ Сборка прошла успешно
+
+### Шаг 4 — Детекция YOLO
+
+- `Detection.swift` — `DetectionClass` (`.boule`/`.cochonnet`) с RU display names и цветами оверлея; `Detection` (id/cls/bbox/score) с нормализованными координатами [0..1]
+- `YOLODetector.swift`:
+  - `processFrame(_:confidenceThreshold:)` — полный пайплайн: letterbox 640×640 → `Detector.prediction` → обратный unletterbox в нормализованные координаты
+  - `parseDetections(from:...)` вынесен в отдельный тестируемый метод, принимающий `MLMultiArray [1,N,6] = [x1,y1,x2,y2,s_boule,s_cochonnet]` и применяющий обратное преобразование gain/pad, маппинг score→класс, ограничение в [0..1]
+- `AppState.swift` — `@MainActor @Observable` хранит последние детекции + считает FPS по скользящему окну в 30 кадров
+- ✅ Сборка прошла успешно
+
+### Шаг 5 — Оверлей с боксами
+
+- `DetectionOverlay.swift` — SwiftUI `Canvas`, переводит нормализованные bbox (landscape image space) в экранные координаты с учётом `resizeAspectFill` и поворота на 90° для портретного экрана
+- Рисует обводку bbox + подпись класса и процента уверенности; цвет по классу (зелёный = boule, жёлтый = cochonnet)
+- `Color(hex:)` хелпер
+- `RootView.swift`: связал `camera.onFrame` → фоновая очередь инференса → `AppState` → перерисовка оверлея; HUD-чипы показывают количество шаров/кошонетов и FPS
+- ✅ Сборка прошла успешно
+
+### Шаг 6 — Тесты и завершение Phase 1
+
+- `PetanqueZTests.swift` — 7 unit-тестов:
+  - `testParseDetections_mapsScoreToCorrectClass` — маппинг score в класс
+  - `testParseDetections_dropsLowConfidence` — отсев по порогу
+  - `testParseDetections_clampsBBoxToUnitRange` — ограничение bbox в [0..1]
+  - `testParseDetections_returnsEmptyOnWrongStride` — обработка некорректной формы тензора
+  - `testDetectionClass_displayNamesAreInRussian` — RU-названия классов
+  - `testAppState_countsDetectionsByClass` — счётчики шаров/кошонетов
+  - `testAppState_computesFpsOverSlidingWindow` — оценка FPS
+- ✅ Все 7 тестов прошли за 0.65 сек на iPhone 16 Simulator
+- Обновил `docs/STATUS.md` — Phase 1 ✅
+- Поставил git-тег `phase1-camera` и запушил в GitHub
+- ⚠️ Визуальная проверка на устройстве отложена — требуется физический iPhone
+
+
