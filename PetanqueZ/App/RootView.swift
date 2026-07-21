@@ -1,75 +1,94 @@
 import CoreImage
 import SwiftUI
 
-/// Корневой экран: превью камеры с оверлеем детекций + HUD с FPS и счётчиком.
+/// Корневой экран: превью камеры с оверлеем детекций + HUD + toolbar + меню.
 struct RootView: View {
-    @StateObject private var camera = CameraSession()
+    @State private var camera = CameraSession()
     @State private var state = AppState()
-
-    /// Запускается на фоновой очереди — один экземпляр на всё время жизни экрана.
+    @State private var settings = SettingsStore()
     @State private var detector = YOLODetector()
+    @State private var showSettings = false
+
     private let inferenceQueue = DispatchQueue(
         label: "com.alexfrompiter.petanque-z.inference",
         qos: .userInitiated
     )
 
-    /// Порог уверенности детекции (доступен для будущих настроек).
-    @State private var confidenceThreshold: Float = YOLODetector.defaultConfidenceThreshold
-
     /// Размер входного изображения (узнаём из первого кадра).
     @State private var imageSize: CGSize = CGSize(width: 1920, height: 1080)
 
     var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
+        NavigationStack {
+            ZStack {
+                Color.black.ignoresSafeArea()
 
-            GeometryReader { geo in
-                if camera.status == .running {
-                    ZStack {
-                        CameraPreviewView(session: camera.session)
-                        DetectionOverlay(
-                            detections: state.detections,
-                            imageSize: imageSize,
-                            canvasSize: geo.size
-                        )
+                GeometryReader { geo in
+                    if camera.status == .running {
+                        ZStack {
+                            CameraPreviewView(session: camera.session)
+                            if settings.detectionShowBoxes {
+                                DetectionOverlay(
+                                    detections: state.detections,
+                                    imageSize: imageSize,
+                                    canvasSize: geo.size
+                                )
+                            }
+                        }
+                    } else {
+                        placeholderView
                     }
-                } else {
-                    placeholderView
                 }
-            }
-            .ignoresSafeArea()
+                .ignoresSafeArea()
 
-            VStack {
-                if camera.status == .running {
-                    hud
-                } else {
-                    statusBanner
+                // Сверху: HUD или статус-баннер
+                VStack {
+                    if camera.status == .running {
+                        hud
+                    } else {
+                        statusBanner
+                    }
+                    Spacer()
                 }
-                Spacer()
             }
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Menu {
+                        Button {
+                            showSettings = true
+                        } label: {
+                            Label("Настройки", systemImage: "gearshape")
+                        }
+                    } label: {
+                        Image(systemName: "line.3.horizontal")
+                            .font(.title3)
+                            .padding(8)
+                            .background(.ultraThinMaterial, in: Circle())
+                            .foregroundStyle(.white)
+                    }
+                }
+            }
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+        }
+        .sheet(isPresented: $showSettings) {
+            SettingsView(settings: settings)
         }
         .task {
-            // Подключаем обработчик кадров: детекция на фоновой очереди,
-            // обновление состояния — на главном потоке.
-            camera.onFrame = { [detector, inferenceQueue] ciImage in
-                let threshold = confidenceThreshold
-                let extent = ciImage.extent
-                let size = CGSize(width: extent.width, height: extent.height)
-                inferenceQueue.async {
-                    let detections = detector.processFrame(
-                        ciImage,
-                        confidenceThreshold: threshold
-                    )
-                    Task { @MainActor in
-                        if size != imageSize { imageSize = size }
-                        state.update(detections: detections)
-                    }
-                }
-            }
+            setupFrameHandler()
             camera.start()
         }
         .onDisappear {
             camera.stop()
+        }
+        .onChange(of: showSettings) { _, isShowing in
+            // Пауза камеры/детекции пока открыты настройки — экономим батарею.
+            if isShowing {
+                camera.stop()
+                state.resetThrottle()
+            } else {
+                camera.start()
+                state.resetThrottle()
+            }
         }
     }
 
@@ -78,20 +97,11 @@ struct RootView: View {
     @ViewBuilder
     private var hud: some View {
         HStack(spacing: 12) {
-            HudChip(
-                icon: "circle.grid.cross",
-                text: "\(state.boulesCount) шаров"
-            )
-            HudChip(
-                icon: "scope",
-                text: "\(state.cochonnetsCount) кош."
-            )
-            HudChip(
-                icon: "speedometer",
-                text: String(format: "%.0f FPS", state.fps)
-            )
+            HudChip(icon: "circle.grid.cross", text: "\(state.boulesCount) шаров")
+            HudChip(icon: "scope", text: "\(state.cochonnetsCount) кош.")
+            HudChip(icon: "speedometer", text: String(format: "%.0f FPS", state.fps))
         }
-        .padding(.top, 8)
+        .padding(.top, 4)
     }
 
     // MARK: - Placeholder / status
@@ -154,6 +164,30 @@ struct RootView: View {
         default: return ""
         }
     }
+
+    // MARK: - Frame handler
+
+    private func setupFrameHandler() {
+        camera.onFrame = { [detector, inferenceQueue, state, settings] ciImage in
+            let threshold = YOLODetector.defaultConfidenceThreshold
+            let extent = ciImage.extent
+            let size = CGSize(width: extent.width, height: extent.height)
+            let now = Date().timeIntervalSince1970
+
+            // Троттлинг по целевому FPS из настроек.
+            guard state.throttleShouldAllow(targetFPS: settings.detectionFrameRate, now: now) else {
+                return
+            }
+
+            inferenceQueue.async {
+                let detections = detector.processFrame(ciImage, confidenceThreshold: threshold)
+                Task { @MainActor in
+                    if size != imageSize { imageSize = size }
+                    state.update(detections: detections, at: now)
+                }
+            }
+        }
+    }
 }
 
 // MARK: - HUD chip
@@ -163,7 +197,7 @@ private struct HudChip: View {
     let text: String
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing:  6) {
             Image(systemName: icon)
             Text(text)
                 .monospacedDigit()

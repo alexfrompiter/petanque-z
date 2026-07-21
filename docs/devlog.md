@@ -90,4 +90,28 @@
 - Поставил git-тег `phase1-camera` и запушил в GitHub
 - ⚠️ Визуальная проверка на устройстве отложена — требуется физический iPhone
 
+### Доработка после Phase 1 — Toolbar + Настройки
+
+- `SettingsStore.swift` (`@MainActor @Observable`): настройки с сохранением в `UserDefaults`:
+  - `detectionFrameRate` — целевая частота детекции, по умолчанию 10, ограничение `[1; maxCameraFPS]`
+  - `detectionShowBoxes` — показывать ли bbox, по умолчанию `true`
+  - `maxCameraFPS` — верхняя граница слайдера (пока захардкожена 30, позже измеряется из камеры)
+  - `clampFrameRate(_:maxFPS:)` — статический хелпер для тестов
+  - значения применяются мгновенно и сохраняются между запусками (через `didSet` + `defaults.register`)
+- `AppState.swift` — добавлен троттлинг детекции:
+  - `throttleShouldAllow(targetFPS:now:)` — пропускает инференс только по целевому FPS
+  - `resetThrottle()` — сброс после паузы/возобновления
+  - `updateCameraFPS(_:)` — приём измеренного FPS камеры (для будущей привязки слайдера)
+- `SettingsView.swift` — панель настроек на `Form`:
+  - блок «Детекция»: слайдер частоты детекции + подпись «N кадр/с» + нижняя граница, `Toggle` «Показывать шары и кошонеты»
+  - `presentationDetents([.medium])` — пол-экрана
+- `RootView.swift`:
+  - полупрозрачный верхний toolbar через `toolbarBackground(.ultraThinMaterial)`
+  - hamburger-меню слева (`line.3.horizontal` иконка), пока один пункт «Настройки»
+  - при открытии настроек камера и детекция останавливаются (`camera.stop()` + `state.resetThrottle()`), при закрытии — перезапускаются
+  - детекция теперь троттлится по `settings.detectionFrameRate`
+  - оверлей скрывается, если `settings.detectionShowBoxes == false`
+- Тесты: добавил `SettingsAndThrottleTests` (8 кейсов) — дефолты, персистентность, ограничения, троттлинг, сброс, нулевой FPS. Все 15 тестов проходят за 0.72 сек.
+
+
 
