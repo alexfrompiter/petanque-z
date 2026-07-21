@@ -3,14 +3,14 @@ import SwiftUI
 /// Оверлей, рисующий bbox детекций поверх превью камеры.
 ///
 /// Детекции приходят в нормализованных координатах [0..1] исходного
-/// изображения (landscape, width > height). Этот view отображает их с учётом
-/// того, что `AVCaptureVideoPreviewLayer` использует `resizeAspectFill` и
-/// показывает landscape-кадр в портретном экране.
+/// изображения (landscape, 1920×1080). `AVCaptureVideoPreviewLayer`
+/// автоматически поворачивает кадр на 90° CCW для портретного экрана
+/// и применяет `resizeAspectFill`.
 struct DetectionOverlay: View {
     let detections: [Detection]
-    /// Физический размер входного изображения (например, 1920×1080).
+    /// Физический размер входного изображения (landscape, например 1920×1080).
     let imageSize: CGSize
-    /// Размер области вывода (экран).
+    /// Размер области рисования (экран, портрет, например 393×852).
     let canvasSize: CGSize
 
     var body: some View {
@@ -23,29 +23,42 @@ struct DetectionOverlay: View {
         .allowsHitTesting(false)
     }
 
-    /// Преобразует нормализованный bbox детекции в экранный прямоугольник.
+    /// Преобразует нормализованный bbox в экранный прямоугольник.
     ///
-    /// При `resizeAspectFill` кадр масштабируется так, чтобы **короткая** сторона
-    /// изображения покрыла **длинную** сторону экрана (с обрезкой по другой оси).
-    /// Для портретного экрана и landscape-кадра: высота кадра → ширина экрана.
-    private func frameRect(for detection: Detection, in size: CGSize) -> CGRect? {
+    /// Шаги:
+    /// 1. CCW 90° поворот ландшафтного кадра в портретный:
+    ///    (nx, ny) в ландшафте → (ny, 1-nx) в портрете.
+    ///    После поворота эффективный размер: imgH × imgW (1080×1920).
+    /// 2. AspectFill масштабирование портретного кадра к экрану:
+    ///    scale = max(screenW / imgH, screenH / imgW).
+    /// 3. Обрезка (crop) по оси, которая шире экрана.
+    private func frameRect(for detection: Detection, in screenSize: CGSize) -> CGRect? {
         guard let imgW = imageSize.width.nonZero,
               let imgH = imageSize.height.nonZero,
-              size.width > 0, size.height > 0 else { return nil }
+              screenSize.width > 0, screenSize.height > 0 else { return nil }
 
-        let scale = size.width / imgH            // высота кадра → ширина экрана
-        let scaledImgH = imgW * scale            // ширина кадра в экранных пикселях
-        let cropY = (scaledImgH - size.height) / 2  // сколько уходит в обрезку сверху/снизу
+        // Шаг 2: AspectFill масштаб.
+        let scaleX = screenSize.width / imgH
+        let scaleY = screenSize.height / imgW
+        let scale = max(scaleX, scaleY)
 
-        // Координаты в кадре (X вдоль длинной стороны, Y вдоль короткой)
-        // поворачиваются на 90°: X_кадра → Y_экрана, Y_кадра → X_экрана.
-        let x = detection.bbox.minY * size.width
-        let y = detection.bbox.minX * scale - cropY
-        let w = detection.bbox.height * size.width
-        let h = detection.bbox.width * scale
+        let scaledW = imgH * scale  // ширина повёрнутого кадра на экране
+        let scaledH = imgW * scale  // высота повёрнутого кадра на экране
+
+        // Обрезка по оси X (горизонтальная, если кадр шире экрана).
+        let cropX = max(0, (scaledW - screenSize.width) / 2)
+        // Обрезка по оси Y (вертикальная, если кадр выше экрана).
+        let cropY = max(0, (scaledH - screenSize.height) / 2)
+
+        // Шаг 1 + 2 + 3: маппинг bbox из нормализованного ландшафта в экран.
+        // CCW 90°: image_Y → screen_X, image_X → screen_Y (с инверсией 1-x).
+        let x = detection.bbox.minY * scaledW - cropX
+        let y = (1.0 - detection.bbox.maxX) * scaledH - cropY
+        let w = detection.bbox.height * scaledW
+        let h = detection.bbox.width * scaledH
 
         return CGRect(x: x, y: y, width: w, height: h).intersection(
-            CGRect(origin: .zero, size: size)
+            CGRect(origin: .zero, size: screenSize)
         )
     }
 

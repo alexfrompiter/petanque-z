@@ -8,6 +8,11 @@ struct RootView: View {
     @State private var settings = SettingsStore()
     @State private var detector = YOLODetector()
     @State private var showSettings = false
+    @State private var shareLog = false
+    /// Последний измеренный размер экрана — для лога.
+    @State private var lastScreenSize: CGSize = .zero
+    /// Счётчик кадров для периодического логирования.
+    @State private var frameLogCounter = 0
 
     private let inferenceQueue = DispatchQueue(
         label: "com.alexfrompiter.petanque-z.inference",
@@ -23,6 +28,10 @@ struct RootView: View {
                 Color.black.ignoresSafeArea()
 
                 GeometryReader { geo in
+                    Color.clear
+                        .onAppear { lastScreenSize = geo.size }
+                        .onChange(of: geo.size) { _, newSize in lastScreenSize = newSize }
+
                     if camera.status == .running {
                         ZStack {
                             CameraPreviewView(session: camera.session)
@@ -58,8 +67,31 @@ struct RootView: View {
                         } label: {
                             Label("Настройки", systemImage: "gearshape")
                         }
+                        Divider()
+                        Button {
+                            shareLog = true
+                        } label: {
+                            Label("Поделиться логом", systemImage: "doc.text")
+                        }
+                        Button {
+                            AppLog.shared.clear()
+                            AppLog.shared.log("Лог очищен пользователем")
+                        } label: {
+                            Label("Очистить лог", systemImage: "trash")
+                        }
                     } label: {
                         Image(systemName: "line.3.horizontal")
+                            .font(.title3)
+                            .padding(8)
+                            .background(.ultraThinMaterial, in: Circle())
+                            .foregroundStyle(.white)
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        logBugReport()
+                    } label: {
+                        Image(systemName: "ladybug")
                             .font(.title3)
                             .padding(8)
                             .background(.ultraThinMaterial, in: Circle())
@@ -72,6 +104,9 @@ struct RootView: View {
         }
         .sheet(isPresented: $showSettings) {
             SettingsView(settings: settings)
+        }
+        .sheet(isPresented: $shareLog) {
+            ShareLogView()
         }
         .task {
             setupFrameHandler()
@@ -168,6 +203,9 @@ struct RootView: View {
     // MARK: - Frame handler
 
     private func setupFrameHandler() {
+        AppLog.shared.log("=== Petanque-Z запущен ===")
+        AppLog.shared.log("Настройки: FPS детекции=\(settings.detectionFrameRate), showBoxes=\(settings.detectionShowBoxes)")
+
         camera.onFrame = { [detector, inferenceQueue, state, settings] ciImage in
             let threshold = YOLODetector.defaultConfidenceThreshold
             let extent = ciImage.extent
@@ -184,9 +222,36 @@ struct RootView: View {
                 Task { @MainActor in
                     if size != imageSize { imageSize = size }
                     state.update(detections: detections, at: now)
+                    logDetectionsPeriodically(detections)
                 }
             }
         }
+    }
+
+    /// Логирует детекции каждые ~60 обработанных кадров (чтобы не заспамить).
+    private func logDetectionsPeriodically(_ detections: [Detection]) {
+        frameLogCounter += 1
+        guard frameLogCounter % 60 == 0 else { return }
+        AppLog.shared.log("Кадр #\(frameLogCounter): \(detections.count) детекций, imageSize=\(imageSize), screen=\(lastScreenSize)")
+        for d in detections {
+            AppLog.shared.log("  \(d.cls.displayName) score=\(String(format: "%.2f", d.score)) bbox=\(d.bbox)")
+        }
+    }
+
+    /// Дамп текущего состояния по нажатию 🐛.
+    private func logBugReport() {
+        AppLog.shared.log("=== 🐛 BUG REPORT ===")
+        AppLog.shared.log("Камера: status=\(String(describing: camera.status))")
+        AppLog.shared.log("Изображение: \(imageSize)")
+        AppLog.shared.log("Экран: \(lastScreenSize)")
+        AppLog.shared.log("FPS детекции: \(String(format: "%.1f", state.fps))")
+        AppLog.shared.log("Настройки: FPS=\(settings.detectionFrameRate), showBoxes=\(settings.detectionShowBoxes)")
+        AppLog.shared.log("Детекций сейчас: \(state.detections.count)")
+        for d in state.detections {
+            AppLog.shared.log("  \(d.cls.rawValue) score=\(String(format: "%.2f", d.score)) bbox=\(String(format: "%.4f %.4f %.4f %.4f", d.bbox.minX, d.bbox.minY, d.bbox.maxX, d.bbox.maxY))")
+        }
+        AppLog.shared.log("Путь к логу: \(AppLog.shared.logFilePath ?? "нет")")
+        AppLog.shared.log("=== END BUG REPORT ===")
     }
 }
 

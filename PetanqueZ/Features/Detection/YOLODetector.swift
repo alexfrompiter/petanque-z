@@ -19,6 +19,9 @@ final class YOLODetector: @unchecked Sendable {
     private let model: Detector?
     private let ciContext = CIContext()
 
+    /// Счётчик обработанных кадров (для логирования и отладки).
+    private var frameCounter: Int = 0
+
     init() {
         let config = MLModelConfiguration()
         // Используем CPU/GPU по умолчанию; для ANE можно установить .cpuAndGPU.
