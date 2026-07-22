@@ -32,30 +32,52 @@ struct DetectionOverlay: View {
     /// Затем AspectFill: scale = max(screenW/imgH, screenH/imgW),
     /// обрезка по оси, которая шире экрана.
     private func frameRect(for detection: Detection, in screenSize: CGSize) -> CGRect? {
-        guard let imgW = imageSize.width.nonZero,
-              let imgH = imageSize.height.nonZero,
-              screenSize.width > 0, screenSize.height > 0 else { return nil }
+        Self.transform(detection.bbox, image: imageSize, screen: screenSize)?.rect
+    }
 
-        // AspectFill масштаб.
-        let scaleX = screenSize.width / imgH
-        let scaleY = screenSize.height / imgW
+    /// Детали преобразования bbox в экранные координаты (для рисования и лога).
+    struct Transform: CustomStringConvertible {
+        let rect: CGRect       // итоговый экранный прямоугольник (до intersection)
+        let scale: CGFloat     // коэффициент AspectFill
+        let scaledW: CGFloat   // ширина кадра на экране
+        let scaledH: CGFloat   // высота кадра на экране
+        let cropX: CGFloat     // горизонтальная обрезка
+        let cropY: CGFloat     // вертикальная обрезка
+
+        var description: String {
+            String(format: "rect=[%.1f,%.1f %.1fx%.1f] scale=%.4f scaled=%.1fx%.1f crop=[%.1f,%.1f]",
+                   rect.minX, rect.minY, rect.width, rect.height,
+                   scale, scaledW, scaledH, cropX, cropY)
+        }
+    }
+
+    /// Статическое преобразование нормализованного bbox в экранные координаты.
+    /// Используется и оверлеем, и логированием (одна математика — один источник правды).
+    static func transform(_ bbox: CGRect, image: CGSize, screen: CGSize) -> Transform? {
+        guard let imgW = image.width.nonZero,
+              let imgH = image.height.nonZero,
+              screen.width > 0, screen.height > 0 else { return nil }
+
+        let scaleX = screen.width / imgH
+        let scaleY = screen.height / imgW
         let scale = max(scaleX, scaleY)
 
         let scaledW = imgH * scale
         let scaledH = imgW * scale
 
-        // Обрезка по осям.
-        let cropX = max(0, (scaledW - screenSize.width) / 2)
-        let cropY = max(0, (scaledH - screenSize.height) / 2)
+        let cropX = max(0, (scaledW - screen.width) / 2)
+        let cropY = max(0, (scaledH - screen.height) / 2)
 
         // CW 90°: image_Y → screen_X (инверсия), image_X → screen_Y.
-        let x = (1.0 - detection.bbox.maxY) * scaledW - cropX
-        let y = detection.bbox.minX * scaledH - cropY
-        let w = detection.bbox.height * scaledW
-        let h = detection.bbox.width * scaledH
+        let x = (1.0 - bbox.maxY) * scaledW - cropX
+        let y = bbox.minX * scaledH - cropY
+        let w = bbox.height * scaledW
+        let h = bbox.width * scaledH
 
-        return CGRect(x: x, y: y, width: w, height: h).intersection(
-            CGRect(origin: .zero, size: screenSize)
+        return Transform(
+            rect: CGRect(x: x, y: y, width: w, height: h),
+            scale: scale, scaledW: scaledW, scaledH: scaledH,
+            cropX: cropX, cropY: cropY
         )
     }
 

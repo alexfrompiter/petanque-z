@@ -243,13 +243,25 @@ struct RootView: View {
     private func logBugReport() {
         AppLog.shared.log("=== 🐛 BUG REPORT ===")
         AppLog.shared.log("Камера: status=\(String(describing: camera.status))")
-        AppLog.shared.log("Изображение: \(imageSize)")
-        AppLog.shared.log("Экран: \(lastScreenSize)")
+        if let previewDesc = CameraPreviewView.lastPreviewView?.debugInfo {
+            AppLog.shared.log("PreviewLayer: \(previewDesc)")
+        } else {
+            AppLog.shared.log("PreviewLayer: (недоступно)")
+        }
+        AppLog.shared.log("Изображение (кадр): \(imageSize) — landscape \(imageSize.width > imageSize.height ? "ДА" : "НЕТ")")
+        AppLog.shared.log("Экран (canvasSize): \(lastScreenSize)")
         AppLog.shared.log("FPS детекции: \(String(format: "%.1f", state.fps))")
         AppLog.shared.log("Настройки: FPS=\(settings.detectionFrameRate), showBoxes=\(settings.detectionShowBoxes)")
         AppLog.shared.log("Детекций сейчас: \(state.detections.count)")
         for d in state.detections {
-            AppLog.shared.log("  \(d.cls.rawValue) score=\(String(format: "%.2f", d.score)) bbox=\(String(format: "%.4f %.4f %.4f %.4f", d.bbox.minX, d.bbox.minY, d.bbox.maxX, d.bbox.maxY))")
+            let norm = String(format: "norm=[%.4f,%.4f %.4fx%.4f]", d.bbox.minX, d.bbox.minY, d.bbox.width, d.bbox.height)
+            let screen: String
+            if let t = DetectionOverlay.transform(d.bbox, image: imageSize, screen: lastScreenSize) {
+                screen = "screen: \(t)"
+            } else {
+                screen = "screen: (transform недоступен)"
+            }
+            AppLog.shared.log("  \(d.cls.rawValue) score=\(String(format: "%.2f", d.score)) \(norm) → \(screen)")
         }
         AppLog.shared.log("Путь к логу: \(AppLog.shared.logFilePath ?? "нет")")
         AppLog.shared.log("=== END BUG REPORT ===")
