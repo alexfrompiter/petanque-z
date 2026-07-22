@@ -28,24 +28,25 @@ struct RootView: View {
                 Color.black.ignoresSafeArea()
 
                 GeometryReader { geo in
-                    Color.clear
+                    let content = Group {
+                        if camera.status == .running {
+                            ZStack {
+                                CameraPreviewView(session: camera.session)
+                                if settings.detectionShowBoxes {
+                                    DetectionOverlay(
+                                        detections: state.detections,
+                                        imageSize: imageSize,
+                                        canvasSize: geo.size
+                                    )
+                                }
+                            }
+                        } else {
+                            placeholderView
+                        }
+                    }
+                    content
                         .onAppear { lastScreenSize = geo.size }
                         .onChange(of: geo.size) { _, newSize in lastScreenSize = newSize }
-
-                    if camera.status == .running {
-                        ZStack {
-                            CameraPreviewView(session: camera.session)
-                            if settings.detectionShowBoxes {
-                                DetectionOverlay(
-                                    detections: state.detections,
-                                    imageSize: imageSize,
-                                    canvasSize: geo.size
-                                )
-                            }
-                        }
-                    } else {
-                        placeholderView
-                    }
                 }
                 .ignoresSafeArea()
 
